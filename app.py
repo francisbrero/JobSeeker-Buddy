@@ -12,9 +12,20 @@ st.title("JobSeeker Buddy")
 st.sidebar.header("User Setup")
 user_id = st.sidebar.text_input("Enter User ID", value="user123")
 
+if user_id:
+    response = requests.get(f"{BACKEND_URL}/user_assets/{user_id}")
+    if response.status_code == 200:
+        user_assets = response.json()
+        st.sidebar.write("Existing Assets:")
+        st.sidebar.write(f"Resume: {user_assets.get('resume')}")
+        st.sidebar.write(f"LinkedIn: {user_assets.get('linkedin')}")
+        st.sidebar.write(f"Experience: {user_assets.get('experience')}")
+    else:
+        st.sidebar.write("No existing assets found for this user.")
+
 uploaded_resume = st.sidebar.file_uploader("Upload Resume", type=["pdf", "docx", "txt"])
 uploaded_linkedin = st.sidebar.file_uploader("Upload LinkedIn Profile (PDF)", type=["pdf"])
-uploaded_experience = st.sidebar.file_uploader("Upload Experience Details (txt)", type=["txt"])
+uploaded_experience = st.sidebar.file_uploader("Upload Experience Details (txt)")
 
 if st.sidebar.button("Upload Assets"):
     if user_id and uploaded_resume and uploaded_linkedin and uploaded_experience:

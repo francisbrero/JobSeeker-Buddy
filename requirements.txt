@@ -6,3 +6,5 @@ streamlit
 python-multipart
 beautifulsoup4
 python-dotenv
+httpx
+openai

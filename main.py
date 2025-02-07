@@ -18,6 +18,9 @@ db = firestore.client()
 # get the LLM_API_URL from the environment variables
 LLM_API_URL = os.getenv("LLM_API_URL")
 
+# Determine whether to use local LLM or OpenAI model
+USE_OPENAI = os.getenv("USE_OPENAI", "false").lower() == "true"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(title="JobSeeker Buddy Backend")
 
@@ -83,7 +86,7 @@ async def upload_assets(
 # 2. Create New Application Folder with Job Scraping via Tavily
 def scrape_job_posting(job_link: str):
     # Assumes Tavily API endpoint is available locally at port 5001.
-    tavily_url = "http://localhost:5001/scrape"
+    tavily_url = "http://localhost:5001/extract"
     try:
         response = requests.get(tavily_url, params={"url": job_link})
         if response.status_code == 200:
@@ -128,18 +131,45 @@ async def new_application(app_request: ApplicationRequest):
 # 3. LLM Integration Functions (Simulated local calls)
 def call_reasoning_model(prompt: str):
     """
-    Call the local LMStudio reasoning model.
+    Call the reasoning model.
     This example uses a streaming response.
     """
-    reasoning_url = LLM_API_URL+"/v1/completions"
-    payload = {"prompt": prompt, "stream": False, "max_tokens": 50000}    
+    if USE_OPENAI:
+        return call_openai_model(prompt, model="o1-mini")
+    else:
+        return call_local_model(prompt)
+
+def call_local_model(prompt: str):
+    """
+    Call the local LMStudio reasoning model.
+    """
+    reasoning_url = LLM_API_URL + "/v1/completions"
+    payload = {"prompt": prompt, "stream": False, "max_tokens": 50000}
     response = requests.post(reasoning_url, json=payload, stream=False)
     response_data = response.json()
-    # write the full response to a file for debugging in a /debug folder. Create the file if it doesn't exist.
     with open("debug/reasoning_response.json", "w") as f:
         json.dump(response_data, f)
-
     return response_data.get("choices", [{}])[0].get("text", "")
+
+def call_openai_model(prompt: str, model: str = "gpt-4o-mini"):
+    """
+    Call the OpenAI model.
+    """
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}]
+        # "max_completion_tokens": 50000,
+    }
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    with open("debug/openai_response.json", "w") as f:
+        json.dump(response.json(), f)
+    response_data = response.json()
+    content = response_data["choices"][0]["message"]["content"]    
+    return content
 
 def call_chat_model(messages: list):
     """
@@ -272,6 +302,15 @@ async def process_feedback(feedback_request: FeedbackRequest):
         "cover_letter": new_cover_letter,
         "resume": new_resume
     }
+
+# 6. Retrieve User Assets
+@app.get("/user_assets/{user_id}")
+async def get_user_assets(user_id: str):
+    user_ref = db.collection("users").document(user_id)
+    user_data = user_ref.get().to_dict()
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user_data
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

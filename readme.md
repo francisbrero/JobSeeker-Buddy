@@ -13,7 +13,7 @@ JobSeeker Buddy is an application designed to streamline the job application pro
 
 ## Project Structure
 
-- **Backend**: Built using FastAPI to handle user asset uploads, job scraping, document generation, and feedback processing. It integrates with Firestore for data storage and connects to a local LLM (via LMStudio) for generating documents.
+- **Backend**: Built using FastAPI to handle user asset uploads, job scraping, document generation, and feedback processing. It integrates with Firestore for data storage and connects to a local LLM (via LMStudio) or OpenAI for generating documents.
 - **Frontend**: A Streamlit-based interface that allows users to upload their assets, create new applications, view generated documents, and submit feedback for further iterations.
 
 ## Installation
@@ -35,9 +35,19 @@ pip install -r requirements.txt
 
 Obtain your Firebase service account credentials.
 Place your credentials JSON file in an appropriate location and update the path in main.py accordingly.
-Running the Application
 
-## Start the Backend Server
+4. **Configure LLM Usage:**
+
+By default, the application uses a local LLM. To use the OpenAI model, set the following environment variables:
+
+```bash
+export USE_OPENAI=true
+export OPENAI_API_KEY=your_openai_api_key
+```
+
+## Running the Application
+
+### Start the Backend Server
 
 Navigate to the backend directory (if separate) or ensure you’re in the project root.
 
@@ -49,7 +59,7 @@ python main.py
 
 The backend server will start on http://localhost:8000.
 
-## Start the Tavily Application
+### Start the Tavily Application
 
 Open a new terminal window.
 
@@ -61,7 +71,9 @@ python tavily.py
 
 The tavily scraping service will start on http://localhost:5001.
 
-## Start the Frontend Application
+You can test it by opening this [url in your browser](http://localhost:5001/scrape?url=https://jobs.lever.co/aircall/75da108e-a859-4ea3-b7e8-0edc9fb0a1d6)
+
+### Start the Frontend Application
 
 Open a new terminal window.
 
@@ -79,14 +91,15 @@ The Streamlit interface will open in your default browser.
 
 Upload your resume, LinkedIn profile (PDF), and work experience details.
 These assets are stored in the main asset folder and referenced in Firestore.
-New Application Creation:
+
+### New Application Creation:
 
 Provide a job posting URL.
 The app uses Tavily to scrape job details and creates a unique application folder.
 
 ### Document Generation:
 
-The backend calls the local LLM to generate a cover letter and customize your resume based on your uploaded assets and the scraped job details.
+The backend calls the local LLM or OpenAI model to generate a cover letter and customize your resume based on your uploaded assets and the scraped job details.
 Generated documents are saved and versioned in Firestore.
 
 ### Feedback & Iteration:

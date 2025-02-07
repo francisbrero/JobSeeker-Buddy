@@ -135,3 +135,6 @@ dist
 
 /venv
 firebase_credentials.json
+
+# test
+__pycache__
