@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from firebase_admin import credentials, firestore
 import firebase_admin
 from dotenv import load_dotenv
+import PyPDF2
 load_dotenv()
 
 # Initialize Firebase Admin SDK (make sure to provide the correct path to your credentials JSON)
@@ -50,6 +51,37 @@ class FeedbackRequest(BaseModel):
 # Endpoints
 # ------------------------------
 
+def read_file_content(file_path):
+    if file_path.lower().endswith('.pdf'):
+        try:
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                content = ''
+                for page in pdf_reader.pages:
+                    content += page.extract_text()
+                return content
+        except Exception as e:
+            print(f"Error reading PDF file: {e}")
+            return None
+    else:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        except Exception as e:
+            print(f"Error reading file: {e}")
+            return None
+
+def parse_document_with_openai(file_path: str) -> str:
+    """
+    Parse the document using OpenAI's GPT-4o-mini.
+    """
+    content = read_file_content(file_path)
+    if content is None:
+        return "Error: Could not read the file."
+    
+    prompt = f"Extract and summarize the key information from the following document:\n\n{content}"
+    return call_openai_model(prompt, model="gpt-4o-mini")
+
 # 1. Upload Main Assets (Resume, LinkedIn PDF, Experience Details)
 @app.post("/upload_assets")
 async def upload_assets(
@@ -73,15 +105,23 @@ async def upload_assets(
     with open(experience_path, "wb") as f:
         f.write(await experience.read())
     
-    # Store file references in Firestore under the "users" collection
+    # Parse documents using OpenAI
+    parsed_resume = parse_document_with_openai(resume_path)
+    parsed_linkedin = parse_document_with_openai(linkedin_path)
+    parsed_experience = parse_document_with_openai(experience_path)
+    
+    # Store file references and parsed content in Firestore under the "users" collection
     user_ref = db.collection("users").document(user_id)
     user_ref.set({
         "resume": resume_path,
         "linkedin": linkedin_path,
         "experience": experience_path,
+        "parsed_resume": parsed_resume,
+        "parsed_linkedin": parsed_linkedin,
+        "parsed_experience": parsed_experience,
     }, merge=True)
     
-    return {"message": "Assets uploaded successfully", "user_id": user_id}
+    return {"message": "Assets uploaded and parsed successfully", "user_id": user_id}
 
 # 2. Create New Application Folder with Job Scraping via Tavily
 def scrape_job_posting(job_link: str):
@@ -134,7 +174,7 @@ def call_reasoning_model(prompt: str):
     Call the reasoning model.
     This example uses a streaming response.
     """
-    if USE_OPENAI:
+    if (USE_OPENAI):
         return call_openai_model(prompt, model="o1-mini")
     else:
         return call_local_model(prompt)
@@ -201,13 +241,15 @@ async def generate_documents(gen_request: GenerateRequest):
     
     job_details = app_data.get("job_details", {})
     
-    # Build prompts for cover letter and resume customization
+    # Build prompts for cover letter and resume customization using parsed and raw text
     cover_letter_prompt = (
         f"Generate a cover letter based on the following job details: {job_details} "
-        f"and the user's experience from resume at {user_data.get('resume')} and details from {user_data.get('experience')}."
+        f"and the user's experience from parsed resume: {user_data.get('parsed_resume')} "
+        f"and parsed LinkedIn profile: {user_data.get('parsed_linkedin')}."
     )
     resume_prompt = (
         f"Modify the resume to highlight the most relevant experiences for the job described as: {job_details}. "
+        f"Use the parsed resume: {user_data.get('parsed_resume')} and parsed LinkedIn profile: {user_data.get('parsed_linkedin')}. "
         "Do not fabricate any information."
     )
     
@@ -261,15 +303,16 @@ async def process_feedback(feedback_request: FeedbackRequest):
     
     job_details = app_data.get("job_details", {})
     
-    # Build new prompts that include the user feedback
+    # Build new prompts that include the user feedback using parsed and raw text
     cover_letter_prompt = (
         f"Based on the previous cover letter and the following feedback: '{feedback_text}', "
         f"regenerate the cover letter for the job described as: {job_details}. "
-        f"Use user resume at {user_data.get('resume')} and experience details from {user_data.get('experience')}."
+        f"Use parsed resume: {user_data.get('parsed_resume')} and parsed LinkedIn profile: {user_data.get('parsed_linkedin')}."
     )
     resume_prompt = (
         f"Based on the previous resume and feedback: '{feedback_text}', "
-        f"regenerate the resume to better highlight relevant experiences for the job: {job_details}."
+        f"regenerate the resume to better highlight relevant experiences for the job: {job_details}. "
+        f"Use parsed resume: {user_data.get('parsed_resume')} and parsed LinkedIn profile: {user_data.get('parsed_linkedin')}."
     )
     
     # Regenerate cover letter
