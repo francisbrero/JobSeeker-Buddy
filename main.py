@@ -38,6 +38,9 @@ APPLICATIONS_DIR = "applications"
 os.makedirs(ASSETS_DIR, exist_ok=True)
 os.makedirs(APPLICATIONS_DIR, exist_ok=True)
 
+# Update any URLs or references to point to the deployed app
+APP_URL = "https://jobseekerbuddy.streamlit.app/"
+
 # ------------------------------
 # Data Models
 # ------------------------------
@@ -441,3 +444,7 @@ Job posting text:
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# If you have any sharing or linking functionality, update it like:
+if st.button("Share this app"):
+    st.markdown(f"Share this app: {APP_URL}")
