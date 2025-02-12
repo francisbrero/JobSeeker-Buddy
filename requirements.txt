@@ -9,3 +9,4 @@ python-dotenv
 httpx
 openai
 PyPDF2
+flask

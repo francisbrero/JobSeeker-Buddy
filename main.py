@@ -4,12 +4,17 @@ import json
 import requests
 import uvicorn
 import asyncio
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from firebase_admin import credentials, firestore
 import firebase_admin
 from dotenv import load_dotenv
 import PyPDF2
+from bs4 import BeautifulSoup
+import openai
+import re
+import streamlit as st
+
 load_dotenv()
 
 # Initialize Firebase Admin SDK (make sure to provide the correct path to your credentials JSON)
@@ -22,6 +27,8 @@ LLM_API_URL = os.getenv("LLM_API_URL")
 # Determine whether to use local LLM or OpenAI model
 USE_OPENAI = os.getenv("USE_OPENAI", "false").lower() == "true"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai  # alias for clarity with updated API usage
 
 app = FastAPI(title="JobSeeker Buddy Backend")
 
@@ -52,7 +59,7 @@ class FeedbackRequest(BaseModel):
 # ------------------------------
 
 def read_file_content(file_path):
-    if file_path.lower().endswith('.pdf'):
+    if (file_path.lower().endswith('.pdf')):
         try:
             with open(file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
@@ -125,15 +132,18 @@ async def upload_assets(
 
 # 2. Create New Application Folder with Job Scraping via Tavily
 def scrape_job_posting(job_link: str):
-    # Assumes Tavily API endpoint is available locally at port 5001.
-    tavily_url = "http://localhost:5001/extract"
+    """
+    Scrape job posting details directly within the FastAPI application.
+    """
     try:
-        response = requests.get(tavily_url, params={"url": job_link})
-        if response.status_code == 200:
-            return response.json()  # Expected: { company, role, responsibilities, requirements, location, ... }
-        else:
-            raise Exception("Tavily scraping failed with status code " + str(response.status_code))
-    except Exception as e:
+        resp = requests.get(job_link)
+        resp.raise_for_status()  # Raise an HTTPError for bad responses
+        html = resp.text
+        soup = BeautifulSoup(html, 'html.parser')
+        text = soup.get_text(separator="\n")
+        job_info = extract_job_info_from_text(text)
+        return job_info
+    except requests.exceptions.RequestException as e:
         # Log the error details
         print(f"Error scraping job posting: {e}")
         raise HTTPException(status_code=500, detail=f"Error scraping job posting: {e}")
@@ -354,6 +364,80 @@ async def get_user_assets(user_id: str):
     if not user_data:
         raise HTTPException(status_code=404, detail="User not found")
     return user_data
+
+# New: Convert the Flask extraction endpoint to FastAPI
+@app.get("/extract")
+async def extract(url: str = Query(...)):
+    """
+    FastAPI endpoint for extracting job posting details.
+    """
+    try:
+        job_info = scrape_job_posting(url)
+        return job_info
+    except Exception as e:
+        return {"error": str(e)}
+
+# Helper function to clean up the JSON output from the model
+def clean_json_output(text):
+    """
+    Attempt to clean up the output from the model.
+    This example uses a simple regex to remove extraneous text before and after the JSON.
+    """
+    # Find the first occurrence of a JSON object in the string.
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        return match.group(0)
+    return text
+
+def extract_job_info_from_text(text):
+    """
+    Uses the OpenAI API (GPT-4o) to extract standard job posting fields
+    from the given text, with strong instructions to output valid JSON.
+    """
+    prompt = f"""
+You are an expert job posting parser. Given the following job posting text, extract and map the information into the following fields:
+- company
+- role
+- location
+- salary
+- description of the role
+- key responsibilities
+- requirements
+
+Return ONLY valid JSON (with no additional commentary) following this exact format:
+{{
+  "company": "<company name or empty string>",
+  "role": "<role name or empty string>",
+  "location": "<location or empty string>",
+  "salary": "<salary or empty string>",
+  "description of the role": "<description or empty string>",
+  "key responsibilities": [ "<responsibility 1>", "<responsibility 2>", ... ],
+  "requirements": [ "<requirement 1>", "<requirement 2>", ... ]
+}}
+
+If any field is missing from the job posting, use an empty string (or an empty list for the list fields). Do not include any other text.
+Job posting text:
+{text}
+    """
+    try:
+        # Call the OpenAI API using the updated API method with GPT-4o
+        completion = client.chat.completions.create(
+            model="gpt-4o",  # Specify the GPT-4 optimized model
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant specialized in parsing job postings."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        # Retrieve the response from the model
+        result = completion.choices[0].message.content
+        
+        # Clean the output to isolate the JSON if extraneous text is present
+        cleaned_result = clean_json_output(result)
+        
+        parsed = json.loads(cleaned_result)
+        return parsed
+    except Exception as e:
+        return {"error": "Extraction failed", "details": str(e)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
