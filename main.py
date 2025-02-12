@@ -41,6 +41,9 @@ os.makedirs(APPLICATIONS_DIR, exist_ok=True)
 # Update any URLs or references to point to the deployed app
 APP_URL = "https://jobseekerbuddy.streamlit.app/"
 
+# Use environment variable or default to production URL
+API_BASE_URL = os.getenv('API_BASE_URL')  # Replace with your actual deployed API URL
+
 # ------------------------------
 # Data Models
 # ------------------------------
@@ -362,11 +365,12 @@ async def process_feedback(feedback_request: FeedbackRequest):
 # 6. Retrieve User Assets
 @app.get("/user_assets/{user_id}")
 async def get_user_assets(user_id: str):
-    user_ref = db.collection("users").document(user_id)
-    user_data = user_ref.get().to_dict()
-    if not user_data:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user_data
+    try:
+        response = requests.get(f"{API_BASE_URL}/user_assets/{user_id}")
+        return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error("Unable to connect to the server. Please check your internet connection or try again later.")
+        return None
 
 # New: Convert the Flask extraction endpoint to FastAPI
 @app.get("/extract")
